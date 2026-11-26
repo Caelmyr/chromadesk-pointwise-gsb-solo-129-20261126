@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ChromaDesk 纸层析判读台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='chromadesk.css') }}">
+  <script src="{{ url_for('static', filename='chromadesk.js') }}" defer></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="mast-content">
+      <a class="brand" href="/"><span class="brand-mark"><i></i><i></i><i></i></span>ChromaDesk</a>
+      <nav aria-label="工作区"><span class="active">层析判读</span><a href="/prepare">图像准备 ↗</a></nav>
+    </div>
+  </header>
+  <main>
+    <section class="intro">
+      <div><h1>纸层析判读台</h1><p>在原片上定量读色带、迁移率与纸白。</p></div>
+      <div class="open-controls">
+        <label class="visually-hidden" for="sample">内置练习</label>
+        <select id="sample"><option value="two-inks">弯湿线双墨样</option><option value="single-ink">平湿线单墨样</option></select>
+        <button id="practice" class="primary" type="button">打开合成练习</button>
+      </div>
+    </section>
+    <section class="workspace">
+      <div class="picture panel">
+        <header class="section-head">
+          <div><h2 id="card-name">原片</h2><p id="card-meta">打开练习或导入一张彩墨层析纸扫描图。</p></div>
+          <label>视图
+            <select id="view" data-card disabled><option value="source">原片</option><option value="density">光密度</option></select>
+          </label>
+        </header>
+        <div class="image-deck">
+          <div id="placeholder"><img alt="程序合成的层析纸预览" src="/chroma/preview.png"></div>
+          <canvas id="photo" aria-label="图像原像素，使用右侧输入或图像指针读取" hidden></canvas>
+        </div>
+        <div class="tools" aria-label="图像工具">
+          <button type="button" data-card disabled data-tool="probe" aria-pressed="true">点读原片</button>
+          <button type="button" data-card disabled data-tool="lane" aria-pressed="false">框选量带</button>
+          <button type="button" data-card disabled data-tool="paper" aria-pressed="false">框选清纸</button>
+          <button type="button" data-card disabled data-tool="front" aria-pressed="false">定位湿线</button>
+          <button type="button" data-card disabled data-tool="origin" aria-pressed="false">定位加样线</button>
+        </div>
+        <div class="legend"><span><i></i>量带</span><span><i></i>清纸框</span><span><i></i>湿线</span><span><i></i>加样线</span></div>
+      </div>
+      <aside class="inspector panel">
+        <header class="section-head"><div><h2>量带设置</h2><p>坐标从原片左上角 (0, 0) 起算</p></div><span id="revision"></span></header>
+        <div class="inspector-body">
+          <details>
+            <summary>导入原片</summary>
+            <form id="upload">
+              <label>样条名<input name="name" maxlength="80" placeholder="例如 青墨对照条"></label>
+              <label>图片<input name="source" type="file" accept="image/png,image/jpeg,image/tiff,image/bmp,image/webp" required></label>
+              <button type="submit">导入并建卡</button>
+            </form>
+          </details>
+          <div class="archive">
+            <label for="cards">已存层析卡</label>
+            <div class="inline"><select id="cards"><option value="">请选择</option></select><button type="button" id="reopen">重开</button></div>
+          </div>
+          <form id="settings">
+            <fieldset id="settings-fields" data-card disabled>
+              <legend>坐标与识别</legend>
+              <p id="lane">量带尚未设置</p><p id="paper">清纸框尚未设置</p>
+              <div class="fields">
+                <label>湿线行<input type="number" id="front" min="0" step="1" required></label>
+                <label>加样行<input type="number" id="origin" min="0" step="1" required></label>
+                <label>认带门槛<input type="number" id="threshold" min=".005" max="2" step="any" required></label>
+              </div>
+              <button type="submit" class="primary">采用量带设置</button>
+            </fieldset>
+          </form>
+          <div class="read-zone">
+            <h3>原点核查</h3>
+            <form id="probe-form" class="read-form">
+              <label>原列<input data-card disabled type="number" id="point-x" min="0" step="1" required></label>
+              <label>原行<input data-card disabled type="number" id="point-y" min="0" step="1" required></label>
+              <button data-card disabled type="submit">点读</button>
+            </form>
+            <form id="locate-form" class="read-form">
+              <label class="wide">目标 Rf<input data-card disabled type="number" id="point-rf" min="0" max="1" step="any" value=".5" required></label>
+              <button data-card disabled type="submit">按迁移率回查</button>
+            </form>
+            <output id="readout" aria-live="polite">在原片上选一点，或填原列与 Rf 回查。</output>
+          </div>
+        </div>
+      </aside>
+    </section>
+    <p id="status" role="status" aria-live="polite"></p>
+    <section class="panel results" id="results" hidden>
+      <header class="section-head"><div><h2>已采用的色带轨迹</h2><p id="report-meta"></p></div>
+        <div class="exports"><a id="strip" download>量带原片 PNG</a><a id="trace" download>轨迹 CSV</a><button type="button" id="prepare">送去图像准备</button></div>
+      </header>
+      <div class="results-content">
+        <div class="plot-wrap">
+          <div class="plot-head"><span>平均相对光密度</span><span>选择曲线点回查原行</span></div>
+          <canvas id="plot" width="760" height="220" aria-label="量带沿原行的平均相对光密度"></canvas>
+        </div>
+        <div class="band-wrap">
+          <table><caption>识别到的色带</caption><thead><tr><th scope="col">峰值 Rf</th><th scope="col">原行范围</th><th scope="col">带宽</th><th scope="col">峰密度</th></tr></thead><tbody id="band-body"></tbody></table>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

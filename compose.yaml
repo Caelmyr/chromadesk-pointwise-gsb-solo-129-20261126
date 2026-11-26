@@ -1,0 +1,16 @@
+name: solo132-chromadesk
+services:
+  desk:
+    build:
+      context: .
+      args:
+        CHROMADESK_DEPS_IMAGE: ${CHROMADESK_DEPS_IMAGE:-python:3.11-slim}
+    image: ${CHROMADESK_IMAGE:-solo132-chromadesk:1.0}
+    network_mode: bridge
+    ports:
+      - "127.0.0.1:${CHROMADESK_PORT:-19932}:8000"
+    volumes:
+      - inspections:/var/lib/chromadesk
+    init: true
+volumes:
+  inspections:
