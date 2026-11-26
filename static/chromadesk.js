@@ -108,6 +108,21 @@ async function loadPhoto() {
 
 const chart = {left: 58, right: 737, top: 17, bottom: 179};
 
+function formatColumnRanges(columns) {
+  if (!columns) return "无共同完整可见原列";
+  if (columns.ranges && columns.ranges.length === 1) {
+    const range = columns.ranges[0];
+    return "原列 " + range.first_x + "–" + range.last_x;
+  }
+  if (columns.ranges && columns.ranges.length > 1) {
+    return columns.count + " 个共同原列（" + columns.ranges.length + " 段）";
+  }
+  if (columns.first_x !== null && columns.first_x !== undefined) {
+    return "原列 " + columns.first_x + "–" + columns.last_x;
+  }
+  return "无共同完整可见原列";
+}
+
 function showReport() {
   const report = state.report;
   const card = state.card;
@@ -160,24 +175,71 @@ function showReport() {
     report.white.map((v) => v.toFixed(1)).join(" / ");
   const body = byId("band-body");
   body.replaceChildren();
-  for (const band of report.bands) {
+  report.bands.forEach((band, index) => {
+    const measured = band.measured_peak || band.narrow_peak || {};
     const row = body.insertRow();
+    row.dataset.bandIndex = String(index);
+    row.dataset.candidateYs = JSON.stringify(band.candidate_ys || []);
+    row.dataset.peakStatus = band.peak_y !== null && band.peak_y !== undefined
+      ? (band.density_is_lower_bound ? "lower-bound" : "evidenced")
+      : (measured.known ? "measured-narrow" : "undetermined");
     const cell = row.insertCell();
     const button = document.createElement("button");
     const swatch = document.createElement("span");
     swatch.className = "swatch";
     swatch.style.background = "rgb(" + band.rgb.join(",") + ")";
     button.type = "button";
-    button.append(swatch, band.rf.toFixed(3));
-    button.addEventListener("click", guarded(() => inspectRange("/probe", {x: probeColumn(), y: band.peak_y})));
+    button.className = "band-peak-button";
+    button.dataset.bandIndex = String(index);
+    if (band.peak_y !== null && band.peak_y !== undefined) {
+      button.dataset.peakStatus = band.density_is_lower_bound ? "lower-bound" : "evidenced";
+      button.append(swatch, document.createTextNode(band.rf.toFixed(3) + (band.density_is_lower_bound ? " ≥" : "")));
+      button.title = "整带宽度下唯一不能排除的原行；点击后按当前原列核查有证峰";
+    } else if (measured.known && measured.rf !== null && measured.rf !== undefined) {
+      button.append(swatch, document.createTextNode("峰未定 · 窄测 " + measured.rf.toFixed(3)));
+      button.title = "整带峰未定；" + measured.message + " 点击后按当前原列核查有证峰";
+    } else {
+      button.append(swatch, document.createTextNode("峰未定 · 核峰"));
+      button.title = (band.message || "多行仍可能最深") + " 点击后按当前原列核查";
+    }
+    button.dataset.peakStatus = band.peak_y !== null && band.peak_y !== undefined
+      ? (band.density_is_lower_bound ? "lower-bound" : "evidenced")
+      : (measured.known ? "measured-narrow" : "undetermined");
+    button.setAttribute("aria-label", "核查第 " + (index + 1) + " 条色带在当前原列的有证峰");
+    button.addEventListener("click", guarded(() => inspectBand(band, index)));
     cell.append(button);
-    for (const value of [band.first_y + "–" + band.last_y, band.width + " px", band.density.toFixed(3)]) {
+    for (const value of [band.first_y + "–" + band.last_y, band.width + " px", band.trace_density?.toFixed?.(3) ?? band.density?.toFixed?.(3)]) {
       row.insertCell().textContent = value;
     }
-  }
+    const evidence = row.insertCell();
+    evidence.className = "peak-evidence";
+    evidence.dataset.testid = "peak-evidence";
+    const candidates = document.createElement("div");
+    candidates.textContent = "候选原行：" + (band.candidate_ys || []).join("、");
+    evidence.append(candidates);
+    const narrow = document.createElement("div");
+    narrow.className = "evidence-range";
+    if (measured.known) {
+      narrow.textContent = "窄范围实测 y=" + measured.y + "，" + formatColumnRanges(measured.columns);
+    } else if (measured.columns) {
+      narrow.textContent = "窄范围同分 y=" + (measured.tied_ys || []).join("、") +
+        "，" + formatColumnRanges(measured.columns);
+    } else {
+      narrow.textContent = measured.message || "无共同完整可见原列";
+    }
+    evidence.append(narrow);
+    const recheckButton = document.createElement("button");
+    recheckButton.type = "button";
+    recheckButton.className = "recheck-peak-button";
+    recheckButton.dataset.bandIndex = String(index);
+    recheckButton.textContent = "重核峰位";
+    recheckButton.title = "按原点核查中当前填写的原列重核该色带";
+    recheckButton.addEventListener("click", guarded(() => inspectBand(band, index)));
+    evidence.append(recheckButton);
+  });
   if (!report.bands.length) {
     const cell = body.insertRow().insertCell();
-    cell.colSpan = 4;
+    cell.colSpan = 5;
     cell.textContent = "没有达到当前门槛的连续色带。";
   }
   byId("strip").href = cardPath("/strip.png");
@@ -190,6 +252,7 @@ async function showCard(card, resetView) {
   state.card = card;
   state.draft = structuredClone(card.settings);
   state.point = null;
+  state.peakMarker = null;
   pointRequest += 1;
   if (resetView) {
     byId("view").value = "source";
@@ -232,17 +295,67 @@ function probeColumn() {
   return byId("point-x").valueAsNumber;
 }
 
+function formatProbe(result) {
+  const fraction = result.rf === null ? "无 Rf（点在量带或行程外）" : "Rf " + result.rf.toFixed(4);
+  const zeroNote = result.density_is_lower_bound
+    ? " · 零通道 " + (result.zero_channels || []).join("") + "：密度只能记作至少 " + result.density.toFixed(4)
+    : "";
+  return "原点 (" + result.x + ", " + result.y + ") · RGB " + result.rgb.join(" / ") +
+    " · 光密度 " + result.density.toFixed(4) + " · " + fraction + zeroNote;
+}
+
+function showProbe(result) {
+  const {x, y} = result;
+  state.point = {x, y};
+  state.peakMarker = null;
+  byId("point-x").value = x;
+  byId("point-y").value = y;
+  byId("readout").textContent = formatProbe(result);
+  draw();
+}
+
 async function inspectRange(route, params) {
   const active = ++pointRequest;
   const result = await json(cardPath(route, params));
   if (active !== pointRequest) return;
-  const {x, y, rgb, density, rf} = result;
-  state.point = {x, y};
-  byId("point-x").value = x;
-  byId("point-y").value = y;
-  const fraction = rf === null ? "无 Rf（点在量带或行程外）" : "Rf " + rf.toFixed(4);
-  byId("readout").textContent = "原点 (" + x + ", " + y + ") · RGB " + rgb.join(" / ") +
-    " · 光密度 " + density.toFixed(4) + " · " + fraction;
+  showProbe(result);
+}
+
+async function inspectBand(band, index) {
+  const x = probeColumn();
+  if (!Number.isInteger(x)) throw new Error("请先在原点核查中填写有效原列");
+  let y = byId("point-y").valueAsNumber;
+  if (!Number.isInteger(y) || y < band.first_y || y > band.last_y) {
+    y = band.trace_peak_y ?? band.first_y;
+  }
+
+  const active = ++pointRequest;
+  const result = await json(cardPath("/probe", {x, y, band: index}));
+  if (active !== pointRequest) return;
+  const check = result.peak_check || result.peak || {};
+
+  const shown = check.known && result.peak_probe ? result.peak_probe : result;
+  if (!shown) throw new Error("原 RGB 点读失败");
+  state.point = {x: shown.x, y: shown.y};
+  state.peakMarker = check.known ? {x: result.x, y: check.peak_y} : null;
+  byId("point-x").value = shown.x;
+  byId("point-y").value = shown.y;
+
+  byId("readout").replaceChildren();
+  const raw = document.createElement("div");
+  raw.textContent = formatProbe(shown);
+  const verdict = document.createElement("div");
+  verdict.id = "peak-verdict";
+  verdict.dataset.testid = "peak-status";
+  verdict.dataset.state = check.known ? "evidenced" : "undetermined";
+  verdict.className = check.known ? "peak-verdict known" : "peak-verdict unknown";
+  if (check.known) {
+    verdict.textContent = "有证峰：原行 " + check.peak_y + " · Rf " + check.rf.toFixed(4) +
+      " · 该列密度 " + check.density.toFixed(4);
+  } else {
+    verdict.textContent = check.message || "峰未定；原 RGB 还能照常点读。";
+  }
+  byId("readout").append(raw, verdict);
   draw();
 }
 

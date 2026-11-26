@@ -95,6 +95,12 @@ caption { padding: 7px 10px; text-align: left; font-weight: 680; }
 th, td { text-align: left; padding: 7px 8px; vertical-align: middle; border-top: 1px solid var(--line); white-space: nowrap; }
 th { color: var(--muted); font-weight: 570; }
 td button { min-height: 28px; padding: .18rem .38rem; }
+.peak-evidence { white-space: normal; min-width: 210px; color: var(--muted); font-size: .78rem; line-height: 1.35; }
+.peak-evidence .evidence-range { margin-top: 2px; }
+.peak-evidence .recheck-peak-button { margin-top: 5px; font-size: .78rem; min-height: 28px; }
+.peak-verdict { margin-top: .32rem; padding-top: .32rem; border-top: 1px solid #d6d4c5; font-weight: 650; }
+.peak-verdict.known { color: #174c33; }
+.peak-verdict.unknown { color: #8a4b12; }
 .swatch { width: 10px; height: 10px; display: inline-block; border-radius: 50%; margin-right: 4px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 980px) {
